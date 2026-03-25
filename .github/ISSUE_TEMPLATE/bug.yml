@@ -21,7 +21,7 @@ body:
       label: Steps to reproduce
       placeholder: |
         1. Service starts with config X
-        2. A .jpg file is added to the watch folder
+        2. A RabbitMQ message is consumed
         3. ...
     validations:
       required: true
@@ -51,9 +51,8 @@ body:
     attributes:
       label: Environment
       options:
-        - Linux
-        - Windows
-        - macOS
+        - Windows 11
+        - Windows 10
         - Other
     validations:
       required: true
