@@ -1,23 +1,61 @@
+using IngestSvc.Watching;
+using Microsoft.Extensions.Options;
+
 namespace IngestSvc;
 
 public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
+    private readonly IOptions<WatcherOptions> _options;
+    private readonly IFileSystemWatcherFactory _factory;
 
-    public Worker(ILogger<Worker> logger)
+    public Worker(
+        ILogger<Worker> logger,
+        IOptions<WatcherOptions> options,
+        IFileSystemWatcherFactory factory)
     {
         _logger = logger;
+        _options = options;
+        _factory = factory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        using var watcher = _factory.Create(_options.Value.Path);
+        watcher.Filter = "*.jpg";
+        watcher.NotifyFilter = NotifyFilters.FileName;
+        watcher.Created += OnFileCreated;
+        watcher.EnableRaisingEvents = true;
+
+        _logger.LogInformation("Watching {Path}", _options.Value.Path);
+
+        await Task.Delay(Timeout.Infinite, stoppingToken);
+    }
+
+    private async void OnFileCreated(object sender, FileSystemEventArgs e)
+    {
+        await WaitForFileReadyAsync(e.FullPath);
+        _logger.LogInformation("Detected file: {Path}", e.FullPath);
+    }
+
+    internal static async Task WaitForFileReadyAsync(
+        string path,
+        int maxAttempts = 10,
+        int delayMs = 200)
+    {
+        for (int i = 0; i < maxAttempts; i++)
         {
-            if (_logger.IsEnabled(LogLevel.Information))
+            try
             {
-                _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
+                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
+                return;
             }
-            await Task.Delay(1000, stoppingToken);
+            catch (IOException)
+            {
+                await Task.Delay(delayMs);
+            }
         }
+
+        // TODO: log a warning if still lock
     }
 }
