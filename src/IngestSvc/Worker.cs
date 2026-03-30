@@ -45,22 +45,31 @@ public class Worker : BackgroundService
 
     internal static async Task WaitForFileReadyAsync(
         string path,
-        int maxAttempts = 10,
-        int delayMs = 200)
+        int maxAttempts = 30,
+        int delayMs = 500)
     {
+        long previousSize = -1;
+
         for (int i = 0; i < maxAttempts; i++)
         {
             try
             {
-                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
-                return;
+                long currentSize = new FileInfo(path).Length;
+
+                if (currentSize > 0 && currentSize == previousSize)
+                    return;
+
+                previousSize = currentSize;
             }
             catch (IOException)
             {
-                await Task.Delay(delayMs);
+                // File not yet accessible
             }
+
+            await Task.Delay(delayMs);
         }
 
-        // TODO: log a warning if still lock
+        throw new TimeoutException(
+            $"File not ready after {maxAttempts * delayMs / 1000}s: {path}");
     }
 }
