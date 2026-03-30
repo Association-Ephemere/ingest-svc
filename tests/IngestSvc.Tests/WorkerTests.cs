@@ -3,13 +3,15 @@ namespace IngestSvc.Tests;
 public class WorkerTests
 {
     [Fact]
-    public async Task WaitForFileReady_Returns_When_File_Is_Available()
+    public async Task WaitForFileReady_Returns_When_File_Size_Is_Stable()
     {
         var path = Path.GetTempFileName();
         try
         {
-            await Worker.WaitForFileReadyAsync(path);
-            // no exception = succes
+            await File.WriteAllBytesAsync(path, new byte[1024]);
+
+            await Worker.WaitForFileReadyAsync(path, maxAttempts: 3, delayMs: 50);
+            // no exception = success
         }
         finally
         {
@@ -18,19 +20,13 @@ public class WorkerTests
     }
 
     [Fact]
-    public async Task WaitForFileReady_Retries_When_File_Is_Locked()
+    public async Task WaitForFileReady_Throws_When_File_Is_Empty()
     {
         var path = Path.GetTempFileName();
         try
         {
-            using var stream = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-
-            var task = Worker.WaitForFileReadyAsync(path, maxAttempts: 3, delayMs: 50);
-
-            await Task.Delay(100);
-            stream.Close();
-
-            await task;
+            await Assert.ThrowsAsync<TimeoutException>(
+                () => Worker.WaitForFileReadyAsync(path, maxAttempts: 3, delayMs: 50));
         }
         finally
         {
