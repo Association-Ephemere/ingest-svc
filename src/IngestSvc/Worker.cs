@@ -44,6 +44,21 @@ public class Worker : BackgroundService
             Directory.CreateDirectory(_options.Value.FailedPath);
         }
 
+        _logger.LogInformation("Waiting for MinIO to become ready...");
+        try 
+        {
+            await _uploader.EnsureReadyAsync(stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "Failed to ensure MinIO readiness. Shutting down worker.");
+            throw;
+        }
+
         using var watcher = _factory.Create(_options.Value.Path);
         watcher.Filter = "*.jpg";
         watcher.NotifyFilter = NotifyFilters.FileName;
@@ -132,13 +147,20 @@ public class Worker : BackgroundService
                 long currentSize = new FileInfo(path).Length;
 
                 if (currentSize > 0 && currentSize == previousSize)
+                {
+                    using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
                     return;
+                }
 
                 previousSize = currentSize;
             }
             catch (IOException)
             {
                 // File not yet accessible
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // File permissions being set
             }
 
             await Task.Delay(delayMs);
