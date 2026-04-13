@@ -11,12 +11,12 @@ Closes #
 
 ## Type of change
 
-- [ ] `feat` — new feature
-- [ ] `fix` — bug fix
-- [ ] `refactor` — refactoring without behavior change
-- [ ] `test` — adding or updating tests
-- [ ] `chore` — maintenance, dependencies, CI
-- [ ] `docs` — documentation only
+- [ ] `feat`: new feature
+- [ ] `fix`: bug fix
+- [ ] `refactor`: refactoring without behavior change
+- [ ] `test`: adding or updating tests
+- [ ] `chore`: maintenance, dependencies, CI
+- [ ] `docs`: documentation only
 
 ## Checklist
 
