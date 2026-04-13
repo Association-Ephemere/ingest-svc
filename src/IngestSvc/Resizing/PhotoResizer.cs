@@ -5,7 +5,7 @@ using SixLabors.ImageSharp.Processing;
 
 namespace IngestSvc.Resizing;
 
-public sealed class PhotoResizer : IPhotoResizer
+public sealed partial class PhotoResizer : IPhotoResizer
 {
     private readonly ResizeOptions _options;
     private readonly ILogger<PhotoResizer> _logger;
@@ -18,6 +18,7 @@ public sealed class PhotoResizer : IPhotoResizer
 
     public Stream Resize(Stream input)
     {
+        LogResizeStarted(_logger, _options.MaxWidth, _options.MaxHeight);
         try
         {
             using var image = Image.Load(input);
@@ -30,12 +31,12 @@ public sealed class PhotoResizer : IPhotoResizer
             var output = new MemoryStream();
             image.SaveAsJpeg(output);
             output.Seek(0, SeekOrigin.Begin);
+            LogResizeCompleted(_logger, newWidth, newHeight);
             return output;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resize image (MaxWidth={MaxWidth}, MaxHeight={MaxHeight})",
-                _options.MaxWidth, _options.MaxHeight);
+            LogResizeFailed(_logger, ex, _options.MaxWidth, _options.MaxHeight);
             throw;
         }
     }
@@ -51,4 +52,13 @@ public sealed class PhotoResizer : IPhotoResizer
 
         return ((int)(originalWidth * ratio), (int)(originalHeight * ratio));
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Resize started (max {MaxWidth}x{MaxHeight})")]
+    private static partial void LogResizeStarted(ILogger logger, int maxWidth, int maxHeight);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Resize completed: output {Width}x{Height}")]
+    private static partial void LogResizeCompleted(ILogger logger, int width, int height);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Resize failed (max {MaxWidth}x{MaxHeight})")]
+    private static partial void LogResizeFailed(ILogger logger, Exception ex, int maxWidth, int maxHeight);
 }
