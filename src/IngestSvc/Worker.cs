@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace IngestSvc;
 
-public class Worker : BackgroundService
+public partial class Worker : BackgroundService
 {
     private readonly ConcurrentDictionary<string, byte> _processingFiles = new();
     private readonly ILogger<Worker> _logger;
@@ -57,8 +57,8 @@ public class Worker : BackgroundService
             Directory.CreateDirectory(_options.Value.FailedPath);
         }
 
-        _logger.LogInformation("Waiting for MinIO to become ready...");
-        try 
+        LogWaitingForMinio(_logger);
+        try
         {
             await _uploader.EnsureReadyAsync(stoppingToken);
         }
@@ -68,7 +68,7 @@ public class Worker : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex, "Failed to ensure MinIO readiness. Shutting down worker.");
+            LogMinioReadinessFailure(_logger, ex);
             throw;
         }
 
@@ -79,7 +79,7 @@ public class Worker : BackgroundService
         watcher.Created += OnFileCreated;
         watcher.EnableRaisingEvents = true;
 
-        _logger.LogInformation("Watching {Path}", _options.Value.Path);
+        LogWatching(_logger, _options.Value.Path);
 
         // Sweep periodically in the background for any missed events or timeouts
         var sweepTask = Task.Run(async () =>
@@ -109,8 +109,8 @@ public class Worker : BackgroundService
 
         if (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Stop signal (SIGTERM) is caught correctly.");
-            
+            LogShutdownInitiated(_logger);
+
             lock (_lock)
             {
                 _isShuttingDown = true;
@@ -123,11 +123,11 @@ public class Worker : BackgroundService
             var pendingTasks = _activeTasks.Keys.ToList();
             if (pendingTasks.Any())
             {
-                _logger.LogInformation("Waiting for {Count} current file(s) processing to complete...", pendingTasks.Count);
+                LogWaitingForPending(_logger, pendingTasks.Count);
                 await Task.WhenAll(pendingTasks);
             }
 
-            _logger.LogInformation("Shutdown is logged.");
+            LogShutdownComplete(_logger);
         }
     }
 
@@ -148,7 +148,7 @@ public class Worker : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to perform directory sweep.");
+            LogSweepFailed(_logger, ex);
         }
     }
 
@@ -174,11 +174,11 @@ public class Worker : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Processing cancelled for {Path} due to shutdown.", fullPath);
+            LogProcessingCancelled(_logger, fullPath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fatal error on {Path}", fullPath);
+            LogProcessingError(_logger, ex, fullPath);
         }
         finally
         {
@@ -190,7 +190,7 @@ public class Worker : BackgroundService
     {
         await WaitForFileReadyAsync(fullPath, token);
         var key = _namer.Generate();
-        _logger.LogInformation("Detected {Path} -> key {Key}", fullPath, key);
+        LogFileDetected(_logger, fullPath, key);
 
         bool uploadSuccess = false;
 
@@ -212,7 +212,7 @@ public class Worker : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to process {Path}", fullPath);
+            LogProcessingFailed(_logger, ex, fullPath);
         }
         finally
         {
@@ -230,10 +230,15 @@ public class Worker : BackgroundService
         {
             var destPath = Path.Combine(destFolder, Path.GetFileName(fullPath));
             File.Move(fullPath, destPath, overwrite: true);
+
+            if (uploadSuccess)
+                LogFileMovedToProcessed(_logger, fullPath);
+            else
+                LogFileMovedToFailed(_logger, fullPath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to move file {Path} to {Destination}", fullPath, destFolder);
+            LogFileMoveError(_logger, ex, fullPath, destFolder);
         }
     }
 
@@ -276,4 +281,46 @@ public class Worker : BackgroundService
         throw new TimeoutException(
             $"File not ready after {maxAttempts * delayMs / 1000}s: {path}");
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Waiting for MinIO to become ready...")]
+    private static partial void LogWaitingForMinio(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Failed to ensure MinIO readiness. Shutting down worker.")]
+    private static partial void LogMinioReadinessFailure(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Watching {Path}")]
+    private static partial void LogWatching(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shutdown initiated (SIGTERM received).")]
+    private static partial void LogShutdownInitiated(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Waiting for {Count} pending file(s) to complete...")]
+    private static partial void LogWaitingForPending(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shutdown complete.")]
+    private static partial void LogShutdownComplete(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Directory sweep failed.")]
+    private static partial void LogSweepFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Processing cancelled for {Path} due to shutdown.")]
+    private static partial void LogProcessingCancelled(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled error processing {Path}.")]
+    private static partial void LogProcessingError(ILogger logger, Exception ex, string path);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "File detected: {Path} -> key {Key}")]
+    private static partial void LogFileDetected(ILogger logger, string path, string key);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to process {Path}.")]
+    private static partial void LogProcessingFailed(ILogger logger, Exception ex, string path);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "File moved to processed: {Path}")]
+    private static partial void LogFileMovedToProcessed(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "File moved to failed: {Path}")]
+    private static partial void LogFileMovedToFailed(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to move {Path} to {Destination}.")]
+    private static partial void LogFileMoveError(ILogger logger, Exception ex, string path, string destination);
 }
