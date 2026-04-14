@@ -73,7 +73,7 @@ public partial class Worker : BackgroundService
         }
 
         using var watcher = _factory.Create(_options.Value.Path);
-        watcher.Filter = "*.jpg";
+        watcher.Filter = "*";
         watcher.NotifyFilter = NotifyFilters.FileName;
         watcher.InternalBufferSize = 65536; // Handle huge bursts up to ~1000 files
         watcher.Created += OnFileCreated;
@@ -135,7 +135,8 @@ public partial class Worker : BackgroundService
     {
         try
         {
-            foreach (var existingFile in Directory.GetFiles(_options.Value.Path, "*.jpg"))
+            foreach (var existingFile in Directory.GetFiles(_options.Value.Path)
+                     .Where(f => SupportedExtensions.Contains(Path.GetExtension(f))))
             {
                 lock (_lock)
                 {
@@ -152,8 +153,13 @@ public partial class Worker : BackgroundService
         }
     }
 
+    private static readonly HashSet<string> SupportedExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg" };
+
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
+        if (!SupportedExtensions.Contains(Path.GetExtension(e.FullPath)))
+            return;
         lock (_lock)
         {
             if (_isShuttingDown) return;
