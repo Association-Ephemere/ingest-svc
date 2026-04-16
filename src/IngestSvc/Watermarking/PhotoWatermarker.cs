@@ -34,6 +34,8 @@ public sealed class PhotoWatermarker : IPhotoWatermarker
 
         image.Mutate(ctx =>
         {
+            ctx.AutoOrient();
+
             if (hasLeft)
             {
                 using var wm = LoadAndResize(_options.BottomLeftPath!);
