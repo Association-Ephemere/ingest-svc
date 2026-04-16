@@ -5,11 +5,19 @@ using IngestSvc.Watching;
 using IngestSvc.Storage;
 using IngestSvc.Naming;
 using IngestSvc.Resizing;
+using IngestSvc.Watermarking;
 
 namespace IngestSvc.Tests;
 
 public class WorkerTests
 {
+    private static IPhotoWatermarker PassthroughWatermarker()
+    {
+        var mock = new Mock<IPhotoWatermarker>();
+        mock.Setup(w => w.Apply(It.IsAny<Stream>())).Returns<Stream>(s => s);
+        return mock.Object;
+    }
+
     [Fact]
     public async Task WaitForFileReady_Returns_When_File_Size_Is_Stable()
     {
@@ -82,7 +90,8 @@ public class WorkerTests
             factoryMock.Object,
             namerMock.Object,
             resizerMock.Object,
-            uploaderMock.Object);
+            uploaderMock.Object,
+            PassthroughWatermarker());
             
         await worker.ProcessFileAsync(srcPath);
         
@@ -130,7 +139,8 @@ public class WorkerTests
             factoryMock.Object,
             namerMock.Object,
             resizerMock.Object,
-            uploaderMock.Object);
+            uploaderMock.Object,
+            PassthroughWatermarker());
             
         await worker.ProcessFileAsync(srcPath);
         
@@ -173,7 +183,8 @@ public class WorkerTests
             factoryMock.Object,
             namerMock.Object,
             resizerMock.Object,
-            uploaderMock.Object);
+            uploaderMock.Object,
+            PassthroughWatermarker());
             
         await worker.ProcessFileAsync(srcPath);
         
@@ -217,7 +228,7 @@ public class WorkerTests
                 await tcs.Task; // Block upload indefinitely until we allow it
             });
             
-        var worker = new Worker(loggerMock.Object, optionsMock.Object, factoryMock.Object, namerMock.Object, resizerMock.Object, uploaderMock.Object);
+        var worker = new Worker(loggerMock.Object, optionsMock.Object, factoryMock.Object, namerMock.Object, resizerMock.Object, uploaderMock.Object, PassthroughWatermarker());
         
         var cts = new CancellationTokenSource();
         var workerTask = worker.StartAsync(cts.Token);
@@ -284,7 +295,7 @@ public class WorkerTests
                 await tcs.Task; // block all
             });
             
-        var worker = new Worker(loggerMock.Object, optionsMock.Object, factoryMock.Object, namerMock.Object, resizerMock.Object, uploaderMock.Object);
+        var worker = new Worker(loggerMock.Object, optionsMock.Object, factoryMock.Object, namerMock.Object, resizerMock.Object, uploaderMock.Object, PassthroughWatermarker());
         var cts = new CancellationTokenSource();
         
         // Since maximum concurrency is 4 (SemaphoreSlim = 4)

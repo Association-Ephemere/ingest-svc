@@ -3,6 +3,7 @@ using IngestSvc.Naming;
 using IngestSvc.Resizing;
 using IngestSvc.Storage;
 using IngestSvc.Watching;
+using IngestSvc.Watermarking;
 using Microsoft.Extensions.Options;
 
 namespace IngestSvc;
@@ -16,6 +17,7 @@ public partial class Worker : BackgroundService
     private readonly IPhotoNamer _namer;
     private readonly IPhotoResizer _resizer;
     private readonly IPhotoUploader _uploader;
+    private readonly IPhotoWatermarker _watermarker;
     private readonly SemaphoreSlim _semaphore = new(4);
     private readonly ConcurrentDictionary<Task, byte> _activeTasks = new();
     private readonly object _lock = new();
@@ -28,7 +30,8 @@ public partial class Worker : BackgroundService
         IFileSystemWatcherFactory factory,
         IPhotoNamer namer,
         IPhotoResizer resizer,
-        IPhotoUploader uploader)
+        IPhotoUploader uploader,
+        IPhotoWatermarker watermarker)
     {
         _logger = logger;
         _options = options;
@@ -36,6 +39,7 @@ public partial class Worker : BackgroundService
         _namer = namer;
         _resizer = resizer;
         _uploader = uploader;
+        _watermarker = watermarker;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -73,7 +77,7 @@ public partial class Worker : BackgroundService
         }
 
         using var watcher = _factory.Create(_options.Value.Path);
-        watcher.Filter = "*.jpg";
+        watcher.Filter = "*";
         watcher.NotifyFilter = NotifyFilters.FileName;
         watcher.InternalBufferSize = 65536; // Handle huge bursts up to ~1000 files
         watcher.Created += OnFileCreated;
@@ -135,7 +139,8 @@ public partial class Worker : BackgroundService
     {
         try
         {
-            foreach (var existingFile in Directory.GetFiles(_options.Value.Path, "*.jpg"))
+            foreach (var existingFile in Directory.GetFiles(_options.Value.Path)
+                     .Where(f => SupportedExtensions.Contains(Path.GetExtension(f))))
             {
                 lock (_lock)
                 {
@@ -152,8 +157,13 @@ public partial class Worker : BackgroundService
         }
     }
 
+    private static readonly HashSet<string> SupportedExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg" };
+
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
+        if (!SupportedExtensions.Contains(Path.GetExtension(e.FullPath)))
+            return;
         lock (_lock)
         {
             if (_isShuttingDown) return;
@@ -199,14 +209,18 @@ public partial class Worker : BackgroundService
         {
             using (var file = File.OpenRead(fullPath))
             {
-                using var fullRes = new MemoryStream();
-                await file.CopyToAsync(fullRes);
+                using var raw = new MemoryStream();
+                await file.CopyToAsync(raw);
 
-                using var forResize = new MemoryStream(fullRes.ToArray());
+                raw.Seek(0, SeekOrigin.Begin);
+                using var fullRes = _watermarker.Apply(raw);
+
+                var fullResBytes = fullRes is MemoryStream ms ? ms.ToArray() : ReadAllBytes(fullRes);
+                using var forResize = new MemoryStream(fullResBytes);
                 using var lowRes = _resizer.Resize(forResize);
 
-                fullRes.Seek(0, SeekOrigin.Begin);
-                await _uploader.UploadAsync(key, fullRes, lowRes);
+                using var fullResUpload = new MemoryStream(fullResBytes);
+                await _uploader.UploadAsync(key, fullResUpload, lowRes);
                 uploadSuccess = true;
             }
         }
@@ -240,6 +254,13 @@ public partial class Worker : BackgroundService
         {
             LogFileMoveError(_logger, ex, fullPath, destFolder);
         }
+    }
+
+    private static byte[] ReadAllBytes(Stream stream)
+    {
+        using var buf = new MemoryStream();
+        stream.CopyTo(buf);
+        return buf.ToArray();
     }
 
     internal static async Task WaitForFileReadyAsync(
