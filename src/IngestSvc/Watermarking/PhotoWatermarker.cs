@@ -28,9 +28,10 @@ public sealed class PhotoWatermarker : IPhotoWatermarker
         }
 
         using var image = Image.Load(input);
-        int pad = _options.PaddingPixels;
+        int padX = _options.PaddingX;
+        int padY = _options.PaddingY;
 
-        _logger.LogDebug("Watermark: image {W}x{H}, pad={Pad}, heightPx={H2}", image.Width, image.Height, pad, _options.HeightPx);
+        _logger.LogDebug("Watermark: image {W}x{H}, padX={PadX}, padY={PadY}, heightPx={H2}", image.Width, image.Height, padX, padY, _options.HeightPx);
 
         image.Mutate(ctx =>
         {
@@ -39,7 +40,7 @@ public sealed class PhotoWatermarker : IPhotoWatermarker
             if (hasLeft)
             {
                 using var wm = LoadAndResize(_options.BottomLeftPath!);
-                var point = new Point(pad, image.Height - wm.Height - pad);
+                var point = new Point(padX, image.Height - wm.Height - padY);
                 _logger.LogDebug("Watermark BL: wm={WW}x{WH} at ({X},{Y})", wm.Width, wm.Height, point.X, point.Y);
                 ctx.DrawImage(wm, point, 1f);
             }
@@ -47,7 +48,7 @@ public sealed class PhotoWatermarker : IPhotoWatermarker
             if (hasRight)
             {
                 using var wm = LoadAndResize(_options.BottomRightPath!);
-                var point = new Point(image.Width - wm.Width - pad, image.Height - wm.Height - pad);
+                var point = new Point(image.Width - wm.Width - padX, image.Height - wm.Height - padY);
                 _logger.LogDebug("Watermark BR: wm={WW}x{WH} at ({X},{Y})", wm.Width, wm.Height, point.X, point.Y);
                 ctx.DrawImage(wm, point, 1f);
             }
